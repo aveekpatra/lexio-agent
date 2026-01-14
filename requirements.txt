@@ -1,0 +1,23 @@
+fastapi>=0.115.0
+uvicorn>=0.30.0
+pydantic>=2.12.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.9
+
+# Database
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+
+# AI/ML
+openai>=1.50.0
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langgraph>=0.2.0
+
+# HTTP
+httpx>=0.27.0
+aiohttp>=3.10.0
+
+# Streaming
+sse-starlette>=2.0.0
