@@ -9,6 +9,7 @@ Slash commands:
 """
 import json
 import re
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query
@@ -19,11 +20,20 @@ from app.config import settings
 from app.agent import agent
 from app import tools
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup/shutdown."""
+    logger.info("Starting Lexio Agent...")
     yield
+    logger.info("Shutting down Lexio Agent...")
     await tools.close_pool()
 
 
@@ -50,12 +60,6 @@ app.add_middleware(
 def parse_command(text: str) -> tuple[str, str]:
     """
     Parse slash command from input.
-    
-    Examples:
-        "/law nájem bytu" -> ("law", "nájem bytu")
-        "/case výpověď" -> ("case", "výpověď")
-        "/search §123" -> ("search", "§123")
-        "nájem bytu" -> ("law", "nájem bytu")  # default to /law
     """
     text = text.strip()
     
@@ -84,16 +88,9 @@ async def query_stream(
 ):
     """
     Main query endpoint with slash command support.
-    
-    Commands:
-    - `/law <query>` - AI-powered law research
-    - `/case <query>` - AI-powered judgment research
-    - `/search <query>` - Quick search, no AI
-    - `/web <query>` - Perplexity web search
-    
-    Default (no slash): treated as /law
     """
     command, query = parse_command(q)
+    logger.info(f"Received query: command={command}, query='{query}'")
     
     # Quick search - no AI, just return results
     if command == "search":
@@ -118,8 +115,12 @@ async def query_stream(
     
     # AI research - law or case
     async def generate():
-        async for event in agent.ask(query):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        try:
+            async for event in agent.ask(query):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"Error during agent execution: {e}", exc_info=True)
+            yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(
         generate(),

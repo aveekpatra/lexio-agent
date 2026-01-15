@@ -354,44 +354,51 @@ class LegalAgent:
 agent = LegalAgent()
 
 
+
 # =============================================================================
 # CLI
 # =============================================================================
 
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("agent-cli")
+
 async def run_question(question: str):
     """Run a single question and print the answer."""
     print(f"\n{'='*60}")
-    print(f"❓ {question}")
+    print(f"QUESTION: {question}")
     print(f"{'='*60}\n")
     
     async for event in agent.ask(question):
         if event["event"] == "thinking":
-            print(f"💭 {event['content']}")
+            # Just log thinking efficiently, don't spam print
+            print(f"Thinking: {event['content']}")
         elif event["event"] == "tool_call":
-            print(f"🔧 {event['tool']}({str(event['args'])[:60]}...)")
+            print(f"Tool Call: {event['tool']} ({str(event['args'])[:60]}...)")
         elif event["event"] == "tool_result":
-            print(f"   → {event['result'][:100]}...")
+            print(f"   -> Result: {event['result'][:100]}...")
         elif event["event"] == "answer":
             print(f"\n{'='*60}")
-            print("📖 ODPOVĚĎ:")
+            print("ANSWER:")
             print("="*60)
             print(event["content"])
             print("="*60)
         elif event["event"] == "done":
-            print("\n✅ Hotovo")
+            print("\nDone.")
     
     await tools.close_pool()
 
 
 if __name__ == "__main__":
     import argparse
+    import asyncio
+    
     parser = argparse.ArgumentParser(description="Lexio Legal Agent")
     parser.add_argument("-q", "--question", type=str, help="Ask a single question")
     args = parser.parse_args()
     
     if args.question:
-        import asyncio
         asyncio.run(run_question(args.question))
     else:
-        print("Usage: python -m app.agent -q 'Vaše právní otázka'")
+        print("Usage: python -m app.agent -q 'Legal question needing analysis'")
 
