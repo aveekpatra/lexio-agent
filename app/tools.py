@@ -12,8 +12,11 @@ from dataclasses import dataclass, asdict
 
 import asyncpg
 import httpx
+import logging
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -55,6 +58,7 @@ async def get_pool() -> asyncpg.Pool:
     """Get or create connection pool to Railway PostgreSQL."""
     global _pool
     if _pool is None:
+        logger.info(f"Creating DB pool to {settings.DATABASE_URL.split('@')[-1]}")
         _pool = await asyncpg.create_pool(
             settings.DATABASE_URL,
             min_size=1,
@@ -68,6 +72,7 @@ async def close_pool():
     """Close connection pool."""
     global _pool
     if _pool:
+        logger.info("Closing DB pool")
         await _pool.close()
         _pool = None
 
