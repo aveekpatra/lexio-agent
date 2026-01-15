@@ -41,19 +41,20 @@ Všechny právní informace musí být platné k tomuto datu. Neodkazuj na infor
    - Podzákonné předpisy (vyhlášky, nařízení)
    - Judikatura (interpretační vodítko, ne primární zdroj)
 
+
 2. **POSTUP ANALÝZY**:
    - Nejdřív identifikuj právní otázku
    - Hledej relevantní ustanovení v zákonech
    - Teprve pak hledej judikaturu pro výklad
-   - Syntetizuj odpověď s citacemi
+   - Odpověz PŘÍMO na otázku, a svá tvrzení podlož citacemi
 
 3. **CITACE** (povinné):
    - Zákony: "§ 123 odst. 1 zákona č. 89/2012 Sb., občanský zákoník"
    - Judikatura: "Nález ÚS sp. zn. III. ÚS 123/20"
    
 4. **DŮLEŽITÉ**:
+   - Odpovídej jasně a srozumitelně (jako klientovi, ne jako soudu)
    - NIKDY nevymýšlej ustanovení - cituj jen to, co máš v kontextu
-   - Pokud nevíš, řekni to jasně
    - Rozlišuj platné a zrušené předpisy
    - Odpovídej v češtině
 
@@ -193,25 +194,30 @@ class LegalAgent:
         use_tools: bool = True
     ) -> Dict:
         """Call OpenRouter API."""
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                self.api_url,
-                headers={
-                    "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://lexio.cz",
-                    "X-Title": "Lexio Legal Agent"
-                },
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "tools": TOOLS if use_tools else None,
-                    "temperature": 0.3,
-                    "max_tokens": 4000
-                }
-            )
-            response.raise_for_status()
-            return response.json()
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    self.api_url,
+                    headers={
+                        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://lexio.cz",
+                        "X-Title": "Lexio Legal Agent"
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "tools": TOOLS if use_tools else None,
+                        "temperature": 0.3,
+                        "max_tokens": 4000
+                    }
+                )
+                response.raise_for_status()
+                return response.json()
+        except Exception as e:
+            logger = logging.getLogger("agent")
+            logger.error(f"API Call failed: {e}")
+            raise
     
     async def _execute_tool(self, name: str, args: Dict) -> str:
         """Execute a tool and return result as JSON string."""
@@ -287,7 +293,10 @@ class LegalAgent:
                 for tool_call in message["tool_calls"]:
                     func = tool_call["function"]
                     name = func["name"]
-                    args = json.loads(func["arguments"])
+                    try:
+                        args = json.loads(func["arguments"])
+                    except json.JSONDecodeError:
+                        args = {}
                     
                     yield {"event": "tool_call", "tool": name, "args": args}
                     
@@ -308,18 +317,22 @@ class LegalAgent:
                         "content": result
                     })
             
-            # Check for final answer
+            # Check for answer content
             elif message.get("content"):
                 yield {"event": "answer", "content": message["content"]}
+                
+                # If finished by length, continue generating
+                if choice.get("finish_reason") == "length":
+                     messages.append({"role": "assistant", "content": message["content"]})
+                     messages.append({"role": "user", "content": "Pokračuj v odpovědi přesně tam, kde jsi skončil (dokonči větu)."})
+                     continue
+                
                 answer_generated = True
                 break
             
-            # Check finish reason
+            # Check finish reason stop (if no content or tool calls matched above)
             if choice.get("finish_reason") == "stop":
-                if message.get("content"):
-                    yield {"event": "answer", "content": message["content"]}
-                    answer_generated = True
-                break
+                 break
         
         # If no answer was generated, force one
         if not answer_generated:
