@@ -188,15 +188,16 @@ class LegalAgent:
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
         self.model = settings.AGENT_MODEL  # gemini-3-flash-preview
     
-    async def _call_api(
+    async def _stream_api(
         self, 
         messages: List[Dict],
         use_tools: bool = True
-    ) -> Dict:
-        """Call OpenRouter API."""
+    ) -> AsyncIterator[Dict]:
+        """Call OpenRouter API with streaming."""
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
+                async with client.stream(
+                    "POST",
                     self.api_url,
                     headers={
                         "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
@@ -209,16 +210,26 @@ class LegalAgent:
                         "messages": messages,
                         "tools": TOOLS if use_tools else None,
                         "temperature": 0.3,
-                        "max_tokens": 4000
+                        "max_tokens": 4000,
+                        "stream": True # Enable streaming
                     }
-                )
-                response.raise_for_status()
-                return response.json()
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                                yield chunk
+                            except json.JSONDecodeError:
+                                continue
         except Exception as e:
             logger = logging.getLogger("agent")
-            logger.error(f"API Call failed: {e}")
+            logger.error(f"API Stream failed: {e}")
             raise
-    
+
     async def _execute_tool(self, name: str, args: Dict) -> str:
         """Execute a tool and return result as JSON string."""
         try:
@@ -265,13 +276,6 @@ class LegalAgent:
     ) -> AsyncIterator[Dict]:
         """
         Ask a legal question with iterative tool use.
-        
-        Yields events:
-        - {"event": "thinking", "content": "..."}
-        - {"event": "tool_call", "tool": "...", "args": {...}}
-        - {"event": "tool_result", "tool": "...", "result": "..."}
-        - {"event": "answer", "content": "..."}
-        - {"event": "done"}
         """
         messages = [
             {"role": "system", "content": get_system_prompt()},
@@ -283,14 +287,68 @@ class LegalAgent:
         answer_generated = False
         
         for iteration in range(max_iterations):
-            response = await self._call_api(messages, use_tools=True)
+            # Accumulators for the stream
+            full_content = ""
+            tool_calls_acc = {} # index -> tool_call object
+            finish_reason = None
             
-            choice = response["choices"][0]
-            message = choice["message"]
+            # Stream the response
+            async for chunk in self._stream_api(messages, use_tools=True):
+                choice = chunk["choices"][0]
+                delta = choice.get("delta", {})
+                finish_reason = choice.get("finish_reason")
+                
+                # Handle Content
+                if delta.get("content"):
+                    content_chunk = delta["content"]
+                    full_content += content_chunk
+                    yield {"event": "answer", "content": content_chunk}
+                
+                # Handle Tool Calls
+                if delta.get("tool_calls"):
+                    for tc_chunk in delta["tool_calls"]:
+                        idx = tc_chunk["index"]
+                        if idx not in tool_calls_acc:
+                            tool_calls_acc[idx] = {
+                                "id": tc_chunk.get("id", ""),
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""}
+                            }
+                        
+                        if "id" in tc_chunk and tc_chunk["id"]:
+                            tool_calls_acc[idx]["id"] = tc_chunk["id"]
+                            
+                        if "function" in tc_chunk:
+                            func = tc_chunk["function"]
+                            if func.get("name"):
+                                tool_calls_acc[idx]["function"]["name"] += func["name"]
+                            if func.get("arguments"):
+                                tool_calls_acc[idx]["function"]["arguments"] += func["arguments"]
             
-            # Check for tool calls
-            if message.get("tool_calls"):
-                for tool_call in message["tool_calls"]:
+            # Convert accumulated tool calls to list
+            tool_calls = list(tool_calls_acc.values()) if tool_calls_acc else None
+            
+            # Construct the assistant message
+            assistant_msg = {
+                "role": "assistant",
+                "content": full_content if full_content else None,
+            }
+            if tool_calls:
+                assistant_msg["tool_calls"] = tool_calls
+            
+            # Add to history (crucial for next turn)
+            # IMPORTANT: API expects content to be string or null, not empty string if tool_calls exist
+            if not assistant_msg["content"] and not assistant_msg.get("tool_calls"):
+                 # Empty message? Skip
+                 continue
+            
+            messages.append(assistant_msg)
+
+            # ---------------------------
+            # LOGIC: Tool Execution
+            # ---------------------------
+            if tool_calls:
+                for tool_call in tool_calls:
                     func = tool_call["function"]
                     name = func["name"]
                     try:
@@ -305,47 +363,32 @@ class LegalAgent:
                     
                     yield {"event": "tool_result", "tool": name, "result": result[:500] + "..." if len(result) > 500 else result}
                     
-                    # Add to messages
-                    messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [tool_call]
-                    })
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
                         "content": result
                     })
+                # Loop continues to get next AI response
+                continue
             
-            # Check for answer content
-            elif message.get("content"):
-                yield {"event": "answer", "content": message["content"]}
-                
+            # ---------------------------
+            # LOGIC: Content / Length
+            # ---------------------------
+            if full_content:
                 # If finished by length, continue generating
-                if choice.get("finish_reason") == "length":
-                     messages.append({"role": "assistant", "content": message["content"]})
+                if finish_reason == "length":
                      messages.append({"role": "user", "content": "Pokračuj v odpovědi přesně tam, kde jsi skončil (dokonči větu)."})
                      continue
                 
                 answer_generated = True
                 break
             
-            # Check finish reason stop (if no content or tool calls matched above)
-            if choice.get("finish_reason") == "stop":
+            if finish_reason == "stop":
                  break
         
-        # If no answer was generated, force one
-        if not answer_generated:
-            yield {"event": "thinking", "content": "Generuji finální odpověď..."}
-            messages.append({
-                "role": "user",
-                "content": "Nyní prosím shrň svou odpověď. Použij informace z předchozích vyhledávání a odpověz přímo na původní otázku."
-            })
-            
-            response = await self._call_api(messages, use_tools=False)
-            final_answer = response["choices"][0]["message"].get("content", "")
-            if final_answer:
-                yield {"event": "answer", "content": final_answer}
+        # Fallback if no answer
+        if not answer_generated and not full_content:
+             yield {"event": "answer", "content": "Omlouvám se, ale nepodařilo se mi vygenerovat odpověď."}
         
         yield {"event": "done"}
     
