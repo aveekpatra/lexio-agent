@@ -426,8 +426,15 @@ class LegalAgent:
         yield {"event": "thinking", "content": "Analyzuji právní otázku..."}
         
         answer_generated = False
+        force_answer_at = max_iterations - 2  # Force answer 2 iterations before limit
         
         for iteration in range(max_iterations):
+            # If approaching limit, tell the LLM to generate answer NOW
+            if iteration == force_answer_at:
+                messages.append({
+                    "role": "user", 
+                    "content": "DŮLEŽITÉ: Máš ještě 2 iterace. Na základě všech informací, které jsi nashromáždil, nyní VYGENERUJ FINÁLNÍ ODPOVĚĎ. Nepoužívej další nástroje, odpověz uživateli."
+                })
             # Accumulators for the stream
             full_content = ""
             tool_calls_acc = {} # index -> tool_call object
