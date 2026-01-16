@@ -176,6 +176,11 @@ TOOLS = [
     }
 ]
 
+# Tools subsets
+TOOLS_CASE = [t for t in TOOLS if t["function"]["name"] in ["search_judgments", "get_full_judgment", "web_search"]]
+TOOLS_LAW = TOOLS # Default includes everything, prioritizing laws
+
+
 
 # =============================================================================
 # AGENT
@@ -193,6 +198,7 @@ class LegalAgent:
     async def _stream_api(
         self, 
         messages: List[Dict],
+        tools_subset: Optional[List[Dict]] = None,
         use_tools: bool = True
     ) -> AsyncIterator[Dict]:
         """Call OpenRouter API with streaming."""
@@ -210,7 +216,7 @@ class LegalAgent:
                     json={
                         "model": self.model,
                         "messages": messages,
-                        "tools": TOOLS if use_tools else None,
+                        "tools": (tools_subset if tools_subset else TOOLS) if use_tools else None,
                         "temperature": 0.3,
                         "max_tokens": 4000,
                         "stream": True # Enable streaming
@@ -274,15 +280,26 @@ class LegalAgent:
     async def ask(
         self, 
         question: str,
+        mode: str = "law",
         max_iterations: int = 10
     ) -> AsyncIterator[Dict]:
         """
         Ask a legal question with iterative tool use.
         """
+        # Select tools based on mode
+        current_tools = TOOLS_CASE if mode == "case" else TOOLS
+        
         messages = [
             {"role": "system", "content": get_system_prompt()},
             {"role": "user", "content": question}
         ]
+        
+        # Add mode instruction
+        if mode == "case":
+            messages.append({
+                "role": "system", 
+                "content": "REŽIM: VYHLEDÁVÁNÍ JUDIKATURY. Hledej pouze v soudních rozhodnutích. Nepoužívej zákony."
+            })
         
         yield {"event": "thinking", "content": "Analyzuji právní otázku..."}
         
@@ -295,7 +312,7 @@ class LegalAgent:
             finish_reason = None
             
             # Stream the response
-            async for chunk in self._stream_api(messages, use_tools=True):
+            async for chunk in self._stream_api(messages, tools_subset=current_tools, use_tools=True):
                 choice = chunk["choices"][0]
                 delta = choice.get("delta", {})
                 finish_reason = choice.get("finish_reason")

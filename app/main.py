@@ -116,7 +116,7 @@ async def query_stream(
     # AI research - law or case
     async def generate():
         try:
-            async for event in agent.ask(query):
+            async for event in agent.ask(query, mode=command):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error(f"Error during agent execution: {e}", exc_info=True)
