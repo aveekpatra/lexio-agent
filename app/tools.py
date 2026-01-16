@@ -342,6 +342,147 @@ async def get_full_judgment(case_number: str) -> Optional[Dict]:
     return None
 
 
+# =============================================================================
+# E-SBÍRKA API TOOLS (Direct API access)
+# =============================================================================
+
+async def search_esbirka_api(
+    law_citation: str,
+    section_citation: Optional[str] = None
+) -> Optional[Dict]:
+    """
+    Search directly in the e-Sbírka API for a specific law and section.
+    
+    Use this as FALLBACK when search_laws doesn't find what you need.
+    Returns the current official version from the source.
+    
+    Args:
+        law_citation: Law citation (e.g., "262/2006 Sb.", "89/2012 Sb.")
+        section_citation: Optional section (e.g., "§ 212", "§ 2235")
+    
+    Returns:
+        Dict with section text and metadata, or None if not found
+    """
+    try:
+        from app.esbirka_api import EsbirkaAPI
+        
+        api = EsbirkaAPI()
+        
+        if section_citation:
+            # Find specific section
+            fragment = await api.find_section(law_citation, section_citation)
+            if fragment:
+                return {
+                    "citation": fragment.section_citation,
+                    "full_citation": fragment.full_citation,
+                    "text": fragment.text,
+                    "is_current": fragment.is_current,
+                    "source_url": f"https://www.e-sbirka.cz{fragment.stale_url}"
+                }
+        else:
+            # Get all fragments for the law
+            fragments = await api.get_law_fragments(law_citation)
+            if fragments:
+                return {
+                    "law_citation": law_citation,
+                    "fragments_count": len(fragments),
+                    "sections": [
+                        {
+                            "citation": f.section_citation,
+                            "text": f.text[:500] + "..." if len(f.text) > 500 else f.text
+                        }
+                        for f in fragments[:20]  # Limit to first 20
+                    ]
+                }
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"E-Sbírka API error: {e}")
+        return {"error": str(e)}
+
+
+async def get_law_changes(since_days: int = 30) -> List[Dict]:
+    """
+    Get recent changes to laws from e-Sbírka API.
+    
+    Use this to check if a law has been recently amended or updated.
+    Useful for ensuring you have the most current version.
+    
+    Args:
+        since_days: How many days back to check (default 30)
+    
+    Returns:
+        List of changed laws with metadata
+    """
+    try:
+        from app.esbirka_api import EsbirkaAPI
+        
+        api = EsbirkaAPI()
+        changes = await api.get_recent_changes(since_days)
+        
+        return [
+            {
+                "law_citation": change.get("citace", ""),
+                "change_date": change.get("datumZmeny", ""),
+                "change_type": change.get("typZmeny", ""),
+                "effective_date": change.get("datumUcinnosti", "")
+            }
+            for change in changes[:20]  # Limit results
+        ]
+        
+    except Exception as e:
+        logger.error(f"E-Sbírka API changelog error: {e}")
+        return []
+
+
+async def get_historical_section(
+    law_citation: str,
+    section_citation: str,
+    date: str
+) -> Optional[Dict]:
+    """
+    Get a historical version of a law section as of a specific date.
+    
+    Use this when analyzing what the law said at a specific point in time,
+    e.g., when an event occurred or for retroactive analysis.
+    
+    Args:
+        law_citation: Law citation (e.g., "262/2006 Sb.")
+        section_citation: Section citation (e.g., "§ 212")
+        date: Date in YYYY-MM-DD format (e.g., "2020-01-15")
+    
+    Returns:
+        Dict with historical section text, or None if not found
+    """
+    try:
+        from app.esbirka_api import EsbirkaAPI
+        
+        api = EsbirkaAPI()
+        fragments = await api.get_law_fragments(law_citation, date=date)
+        
+        # Find the matching section
+        normalized_target = section_citation.strip().lower().replace(" ", "")
+        
+        for frag in fragments:
+            normalized_frag = frag.section_citation.strip().lower().replace(" ", "")
+            if normalized_target in normalized_frag or normalized_frag in normalized_target:
+                return {
+                    "citation": frag.section_citation,
+                    "full_citation": frag.full_citation,
+                    "text": frag.text,
+                    "as_of_date": date,
+                    "is_historical": True,
+                    "source_url": f"https://www.e-sbirka.cz{frag.stale_url}"
+                }
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"E-Sbírka API historical error: {e}")
+        return {"error": str(e)}
+
+
 async def web_search(query: str) -> Optional[Dict]:
     """
     Web search via Perplexity Sonar through OpenRouter.
@@ -371,4 +512,3 @@ async def web_search(query: str) -> Optional[Dict]:
                 "citations": data.get("citations", [])
             }
     return None
-

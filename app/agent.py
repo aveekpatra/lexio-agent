@@ -48,11 +48,12 @@ Všechny právní informace musí být platné k tomuto datu. Neodkazuj na infor
    - Teprve pak hledej judikaturu pro výklad
    - Odpověz PŘÍMO na otázku, a svá tvrzení podlož citacemi
 
-3. **CITACE A ODKAZY** (povinné):
-   - **VŽDY** vytvářej aktivní odkazy na zákony, pokud máš `source_url`.
-   - Formát: `[§ 123 zákona č. 89/2012 Sb.](URL)`
-   - Pokud odkaz nemáš, použij jen textovou citaci.
-   - Judikatura: "Nález ÚS sp. zn. III. ÚS 123/20"
+3. **CITACE A ODKAZY** (POVINNÉ - STRIKTNĚ DODRŽUJ):
+   - **KAŽDÁ** citace zákona MUSÍ mít odkaz, pokud máš `source_url` z nástroje.
+   - Formát: `[§ 123 zákona č. 89/2012 Sb.](source_url)` - použij přesný URL z výsledku nástroje.
+   - Příklad správné citace: `[§ 2235 občanského zákoníku](https://www.e-sbirka.cz/sb/2012/89#par_2235)`
+   - BEZ odkazu NIKDY necituj zákon, pokud source_url existuje!
+   - Judikatura: "Nález ÚS sp. zn. III. ÚS 123/20" (odkaz pokud dostupný)
    
 4. **DŮLEŽITÉ**:
    - Odpovídej jasně a srozumitelně (jako klientovi, ne jako soudu)
@@ -62,13 +63,45 @@ Všechny právní informace musí být platné k tomuto datu. Neodkazuj na infor
 
 ## DOSTUPNÉ NÁSTROJE
 
-- `search_laws` - Hledání v zákonech (PRIMÁRNÍ zdroj)
-- `search_judgments` - Hledání v judikatuře (SEKUNDÁRNÍ)
-- `get_full_section` - Celý text paragrafu
-- `get_full_judgment` - Celý text rozhodnutí
-- `web_search` - Webové vyhledávání (Perplexity Sonar pro aktuální informace)
+### PRIMÁRNÍ (databáze - bez limitu):
+- `search_laws` - **VŽDY POUŽIJ PRVNÍ** - rychlé vyhledávání v naší databázi
+- `get_full_section` - Celý text paragrafu z databáze
 
-Používej nástroje iterativně dokud nemáš dostatek informací pro kvalitní odpověď."""
+### E-SBÍRKA API (pouze jako ZÁLOHA - limit 25 req/sec):
+- `search_esbirka_api` - Přímé vyhledávání v E-Sbírka API. **POUZE když search_laws NENAJDE!**
+- `get_law_changes` - Nedávné změny zákonů (použij pro ověření novelizací)
+- `get_historical_section` - Historická verze k určitému datu (použij jen když potřebuješ starší verzi)
+
+### OSTATNÍ:
+- `search_judgments` - Judikatura (sekundární zdroj)
+- `get_full_judgment` - Celý text rozhodnutí
+- `web_search` - **POUZE** pro neprávní informace (čísla, statistiky)
+
+## PRIORITA NÁSTROJŮ PRO ZÁKONY
+
+⚠️ **DŮLEŽITÉ**: E-Sbírka API nástroje mají limit 25 req/sec. VŽDY preferuj databázi!
+
+1. `search_laws` → VŽDY začni zde (databáze)
+2. `get_full_section` → pro přesné znění (databáze)
+3. Zkus jiný dotaz v `search_laws` (jiná slova, synonyma)
+4. `search_esbirka_api` → POUZE pokud databáze opravdu nemá data
+5. `get_historical_section` → jen pro historickou analýzu
+6. `web_search` → POUZE pro neprávní doplňující info
+
+## DŮKLADNOST ANALÝZY
+
+- Používej nástroje iterativně dokud nemáš dostatek informací pro kvalitní odpověď.
+- **VNOŘENÉ CITACE**: Pokud zákon odkazuje na jiný zákon (např. § 420 odkazuje na § 2910), vyhledej i ten odkazovaný zákon!
+- Neboj se provést více vyhledávání pro úplný obraz.
+- Pro složité otázky proveď postupnou analýzu: obecná ustanovení → specifická ustanovení → judikatura.
+- Kvalita a přesnost je důležitější než rychlost.
+
+## POKUD NENAJDEŠ V DATABÁZI
+
+1. Zkus jiný dotaz v `search_laws` (synonym, jiná formulace)
+2. Zkus `get_full_section` s konkrétní citací (např. "89/2012 Sb.", "§ 2235")
+3. Teprve pokud databáze opravdu nemá → `search_esbirka_api`
+4. **NIKDY** nepoužívej `web_search` jako náhradu za právní databázi!"""
 
 
 # Tool definitions for Gemini
@@ -160,8 +193,71 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "search_esbirka_api",
+            "description": "Přímé vyhledávání v E-Sbírka API. Použij jako ZÁLOHU když search_laws nenajde výsledek. Vrací aktuální oficiální znění ze zdroje.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "law_citation": {
+                        "type": "string",
+                        "description": "Citace zákona (např. '262/2006 Sb.', '89/2012 Sb.')"
+                    },
+                    "section_citation": {
+                        "type": "string",
+                        "description": "Volitelná citace paragrafu (např. '§ 212', '§ 2235')"
+                    }
+                },
+                "required": ["law_citation"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_law_changes",
+            "description": "Získá seznam nedávných změn zákonů z E-Sbírka API. Použij pro ověření, zda byl zákon nedávno novelizován.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "since_days": {
+                        "type": "integer",
+                        "description": "Počet dní zpětně (default 30)"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_historical_section",
+            "description": "Získá historickou verzi paragrafu k určitému datu. Použij pro analýzu, co zákon stanovil v minulosti (např. když se posuzuje událost z roku 2020).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "law_citation": {
+                        "type": "string",
+                        "description": "Citace zákona (např. '262/2006 Sb.')"
+                    },
+                    "section_citation": {
+                        "type": "string",
+                        "description": "Citace paragrafu (např. '§ 212')"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Datum ve formátu RRRR-MM-DD (např. '2020-01-15')"
+                    }
+                },
+                "required": ["law_citation", "section_citation", "date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
-            "description": "Webové vyhledávání pomocí Perplexity Sonar. Použij pro aktuální informace, novinky, nebo když v právní databázi nic nenajdeš.",
+            "description": "Webové vyhledávání pomocí Perplexity Sonar. Použij POUZE pro aktuální informace (čísla, data, statistiky). NEPOUŽÍVEJ jako náhradu právní databáze!",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -178,7 +274,7 @@ TOOLS = [
 
 # Tools subsets
 TOOLS_CASE = [t for t in TOOLS if t["function"]["name"] in ["search_judgments", "get_full_judgment", "web_search"]]
-TOOLS_LAW = TOOLS # Default includes everything, prioritizing laws
+TOOLS_LAW = [t for t in TOOLS if t["function"]["name"] in ["search_laws", "get_full_section", "search_esbirka_api", "get_law_changes", "get_historical_section", "web_search"]]
 
 
 
@@ -203,7 +299,7 @@ class LegalAgent:
     ) -> AsyncIterator[Dict]:
         """Call OpenRouter API with streaming."""
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 async with client.stream(
                     "POST",
                     self.api_url,
@@ -218,7 +314,7 @@ class LegalAgent:
                         "messages": messages,
                         "tools": (tools_subset if tools_subset else TOOLS) if use_tools else None,
                         "temperature": 0.3,
-                        "max_tokens": 4000,
+                        "max_tokens": 8000,
                         "stream": True # Enable streaming
                     }
                 ) as response:
@@ -271,6 +367,27 @@ class LegalAgent:
                 result = await tools.web_search(args["query"])
                 return json.dumps(result or {"error": "No results"}, ensure_ascii=False)
             
+            elif name == "search_esbirka_api":
+                result = await tools.search_esbirka_api(
+                    args["law_citation"],
+                    section_citation=args.get("section_citation")
+                )
+                return json.dumps(result or {"error": "Not found in E-Sbírka API"}, ensure_ascii=False)
+            
+            elif name == "get_law_changes":
+                results = await tools.get_law_changes(
+                    since_days=args.get("since_days", 30)
+                )
+                return json.dumps(results, ensure_ascii=False)
+            
+            elif name == "get_historical_section":
+                result = await tools.get_historical_section(
+                    args["law_citation"],
+                    args["section_citation"],
+                    args["date"]
+                )
+                return json.dumps(result or {"error": "Historical version not found"}, ensure_ascii=False)
+            
             else:
                 return json.dumps({"error": f"Unknown tool: {name}"})
         
@@ -281,13 +398,18 @@ class LegalAgent:
         self, 
         question: str,
         mode: str = "law",
-        max_iterations: int = 10
+        max_iterations: int = 20
     ) -> AsyncIterator[Dict]:
         """
         Ask a legal question with iterative tool use.
         """
         # Select tools based on mode
-        current_tools = TOOLS_CASE if mode == "case" else TOOLS
+        if mode == "case":
+            current_tools = TOOLS_CASE
+        elif mode == "law":
+            current_tools = TOOLS_LAW
+        else:
+            current_tools = TOOLS  # Default: all tools
         
         messages = [
             {"role": "system", "content": get_system_prompt()},
