@@ -194,7 +194,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_esbirka_api",
-            "description": "Přímé vyhledávání v E-Sbírka API. Použij jako ZÁLOHU když search_laws nenajde výsledek. Vrací aktuální oficiální znění ze zdroje.",
+            "description": "⚠️ POZOR: Použij POUZE pokud search_laws a get_full_section vrátily prázdný výsledek nebo chybu! Přímé vyhledávání v E-Sbírka API (limit 25 req/sec). NIKDY nepoužívej jako první volbu - vždy nejdřív databáze!",
             "parameters": {
                 "type": "object",
                 "properties": {
