@@ -356,7 +356,7 @@ class LegalAgent:
                     except json.JSONDecodeError:
                         args = {}
                     
-                    yield {"event": "tool_call", "tool": name, "args": args}
+                    yield {"event": "tool_call", "tool": name, "input": args}
                     
                     # Execute tool
                     result = await self._execute_tool(name, args)
