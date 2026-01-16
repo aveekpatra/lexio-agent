@@ -129,6 +129,33 @@ async def get_embedding(query: str) -> List[float]:
 
 
 # =============================================================================
+# URL HELPER
+# =============================================================================
+
+def build_esbirka_url(version_id: str, citation: Optional[str] = None) -> str:
+    """
+    Build a URL to the official e-Sbírka website with fragment anchor.
+    """
+    import re
+    
+    base_url = "https://www.e-sbirka.cz"
+    url = f"{base_url}/{version_id}"
+    
+    # Add fragment anchor if citation provided
+    if citation:
+        # § 51 → #par_51, Čl. 5 → #cl_5
+        par_match = re.match(r'§\s*(\d+)', citation)
+        cl_match = re.match(r'[Čč]l\.?\s*(\d+)', citation)
+        
+        if par_match:
+            url += f"#par_{par_match.group(1)}"
+        elif cl_match:
+            url += f"#cl_{cl_match.group(1)}"
+            
+    return url
+
+
+# =============================================================================
 # SEARCH TOOLS
 # =============================================================================
 
@@ -206,7 +233,7 @@ async def search_laws(
             valid_from=row['valid_from'],
             text=row['text'],
             score=float(row['score']),
-            source_url=f"https://www.e-sbirka.cz/{row['version_id']}"
+            source_url=build_esbirka_url(row['version_id'], row['citation'])
         )
         for row in rows
     ]
@@ -287,7 +314,7 @@ async def get_full_section(law_citation: str, section_citation: str) -> Optional
             "law_citation": row['law_citation'],
             "law_title": row['law_title'],
             "full_text": row['full_text'],
-            "source_url": f"https://www.e-sbirka.cz/{row['version_id']}"
+            "source_url": build_esbirka_url(row['version_id'], row['citation'])
         }
     return None
 
