@@ -48,8 +48,10 @@ Všechny právní informace musí být platné k tomuto datu. Neodkazuj na infor
    - Teprve pak hledej judikaturu pro výklad
    - Odpověz PŘÍMO na otázku, a svá tvrzení podlož citacemi
 
-3. **CITACE** (povinné):
-   - Zákony: "§ 123 odst. 1 zákona č. 89/2012 Sb., občanský zákoník"
+3. **CITACE A ODKAZY** (povinné):
+   - **VŽDY** vytvářej aktivní odkazy na zákony, pokud máš `source_url`.
+   - Formát: `[§ 123 zákona č. 89/2012 Sb.](URL)`
+   - Pokud odkaz nemáš, použij jen textovou citaci.
    - Judikatura: "Nález ÚS sp. zn. III. ÚS 123/20"
    
 4. **DŮLEŽITÉ**:
@@ -253,11 +255,11 @@ class LegalAgent:
                     args["law_citation"],
                     args["section_citation"]
                 )
-                return json.dumps(result or {"error": "Not found"}, ensure_ascii=False)
+                return json.dumps(asdict(result) if result else {"error": "Not found"}, ensure_ascii=False)
             
             elif name == "get_full_judgment":
                 result = await tools.get_full_judgment(args["case_number"])
-                return json.dumps(result or {"error": "Not found"}, ensure_ascii=False)
+                return json.dumps(asdict(result) if result else {"error": "Not found"}, ensure_ascii=False)
             
             elif name == "web_search":
                 result = await tools.web_search(args["query"])
